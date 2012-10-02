@@ -186,7 +186,7 @@ namespace Dune
                    int linsolver_verbosity = 1,
                    int linsolver_type = 1,
                    bool same_matrix = false,
-                   int linsolver_smoother_steps = 2)
+                   int linsolver_smooth_steps=2)
         {
             if (same_matrix) {
                 MESSAGE("Requested reuse of preconditioner, not implemented so far.");
@@ -240,7 +240,7 @@ namespace Dune
             params.insertParameter("linsolver_type", boost::lexical_cast<std::string>(linsolver_type));
             params.insertParameter("linsolver_max_iterations", boost::lexical_cast<std::string>(linsolver_maxit));
             params.insertParameter("linsolver_prolongate_factor", boost::lexical_cast<std::string>(linsolver_prolongate_factor));
-            params.insertParameter("linsolver_smooth_steps", boost::lexical_cast<std::string>(linsolver_smooth_steps)); 
+            params.insertParameter("linsolver_smooth_steps", boost::lexical_cast<std::string>(linsolver_smooth_steps));
             linsolver_.init(params);
             LinearSolverISTL::LinearSolverResults res = linsolver_.solve(s.n, s.nnz, s.ia, s.ja, s.sa, s.b, s.x);
             if (!res.converged) {
