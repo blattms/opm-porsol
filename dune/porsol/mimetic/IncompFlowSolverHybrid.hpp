@@ -56,6 +56,8 @@
 #include <opm/core/utility/ErrorMacros.hpp>
 #include <opm/core/utility/SparseTable.hpp>
 
+#include <opm/core/linalg/GsAmgIstl.hpp>
+
 #include <dune/istl/bvector.hh>
 #include <dune/istl/bcrsmatrix.hh>
 #include <dune/istl/operators.hh>
@@ -670,6 +672,10 @@ namespace Dune {
                 solveLinearSystemKAMG(residual_tolerance, linsolver_verbosity, 
 				      linsolver_maxit, prolongate_factor, same_matrix,smooth_steps);
                 break;
+            case 3: // fast Gauss Seidel AMG
+	      solveLinearSystemGSAMG(residual_tolerance, linsolver_verbosity,
+				    linsolver_maxit, prolongate_factor, same_matrix);
+
             default:
                 std::cerr << "Unknown linsolver_type: " << linsolver_type << '\n';
                 throw std::runtime_error("Unknown linsolver_type");
@@ -1474,6 +1480,70 @@ namespace Dune {
                 smootherArgs.onthefly = false;
 #endif
                 Criterion criterion;
+                criterion.setDebugLevel(verbosity_level);
+                criterion.setSkipIsolated(true);
+#if ANISOTROPIC_3D
+                criterion.setDefaultValuesAnisotropic(3, 2);
+#endif
+                criterion.setProlongationDampingFactor(prolong_factor);
+                precond_.reset(new Precond(*opS_, criterion, smootherArgs,
+				           1, smooth_steps, smooth_steps));
+            }
+            // Construct solver for system of linear equations.
+            CGSolver<Vector> linsolve(*opS_, *precond_, residTol, (maxit>0)?maxit:S_.N(), verbosity_level);
+
+            InverseOperatorResult result;
+            soln_ = 0.0;
+            // Adapt initial guess such Dirichlet boundary conditions are 
+            // represented, i.e. soln_i=A_{ii}^-1 rhs_i
+            typedef typename BCRSMatrix <MatrixBlockType>::ConstRowIterator RowIter;
+            typedef typename BCRSMatrix <MatrixBlockType>::ConstColIterator ColIter;
+            for(RowIter ri=S_.begin(); ri!=S_.end(); ++ri){
+                bool isDirichlet=true;
+                for(ColIter ci=ri->begin(); ci!=ri->end(); ++ci)
+                    if(ci.index()!=ri.index() && *ci!=0.0)
+                        isDirichlet=false;
+                if(isDirichlet)
+                    soln_[ri.index()]=rhs_[ri.index()]/S_[ri.index()][ri.index()];
+            }
+            // Solve system of linear equations to recover
+            // face/contact pressure values (soln_).
+            linsolve.apply(soln_, rhs_, result);
+            if (!result.converged) {
+                THROW("Linear solver failed to converge in " << result.iterations << " iterations.\n"
+                      << "Residual reduction achieved is " << result.reduction << '\n');
+            }
+
+        }
+        // ----------------------------------------------------------------
+        void solveLinearSystemGSAMG(double residual_tolerance, int verbosity_level,
+                                  int maxit, double prolong_factor, bool same_matrix)
+        // ----------------------------------------------------------------
+        {
+            typedef Amg::GSAMG<Operator,Vector,Smoother>   Precond;
+            boost::scoped_ptr<Precond> precond_;
+
+            // Adapted from upscaling.cc by Arne Rekdal, 2009
+            Scalar residTol = residual_tolerance;
+
+            if (!same_matrix) {
+                // Regularize the matrix (only for pure Neumann problems...)
+                if (do_regularization_) {
+                    S_[0][0] *= 2;
+                }
+                opS_.reset(new Operator(S_));
+		
+                // Construct preconditioner.
+                double relax = 1;
+                typename Precond::SmootherArgs smootherArgs;
+                smootherArgs.relaxationFactor = relax;
+#if SMOOTHER_BGS
+                smootherArgs.overlap =  Precond::SmootherArgs::none;
+                smootherArgs.onthefly = false;
+#endif
+                typedef Amg::AggregationCriterion<Amg::SymmetricMatrixDependency<Matrix,CouplingMetric> > CriterionBase;
+		
+		Amg::CoarsenCriterion<CriterionBase> criterion;
                 criterion.setDebugLevel(verbosity_level);
                 criterion.setSkipIsolated(true);
 #if ANISOTROPIC_3D
