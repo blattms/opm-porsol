@@ -123,6 +123,36 @@ namespace Opm
                 } else {
                     std::cout << "---- Exit - BlackoilSimulator.hpp: No gravity, no fun ... ----" << std::endl;
                     exit(-1);
+                } 
+            } else if (param.getDefault("CO2-injection", false)) {
+                CompVec init_water(0.0);
+                // Initially water filled (use Oil-component for water in order
+                // to utilise blackoil mechanisms for brine-co2 interaction)          
+                init_water[Fluid::Oil] = 1.0;  
+                simstate.cell_z_.resize(grid.numCells());
+                std::fill(simstate.cell_z_.begin(),simstate.cell_z_.end(),init_water);
+
+                double datum_pressure_barsa = param.getDefault<double>("datum_pressure", 200.0);
+                double datum_pressure = Opm::unit::convert::from(datum_pressure_barsa, Opm::unit::barsa);
+                PhaseVec init_p(datum_pressure);
+                simstate.cell_pressure_.resize(grid.numCells(), init_p);
+
+                // Simple initial condition based on "incompressibility"-assumption
+                double zMin = grid.cellCentroid(0)[2];
+                for (int cell = 1; cell < grid.numCells(); ++cell) {
+                    if (grid.cellCentroid(cell)[2] < zMin)
+                        zMin = grid.cellCentroid(cell)[2];
+                }
+
+                typename Fluid::FluidState state = fluid.computeState(init_p, init_water);
+		simstate.cell_z_[0] *= 1.0/state.total_phase_volume_density_;
+                double density = (init_water*fluid.surfaceDensities())/state.total_phase_volume_density_;
+
+                for (int cell = 0; cell < grid.numCells(); ++cell) {
+                    double pressure(datum_pressure + (grid.cellCentroid(cell)[2] - zMin)*gravity[2]*density);
+                    simstate.cell_pressure_[cell] = PhaseVec(pressure);
+                    state = fluid.computeState(simstate.cell_pressure_[cell], simstate.cell_z_[cell]);
+                    simstate.cell_z_[cell] *= 1.0/state.total_phase_volume_density_;
                 }       
             } else {
                 CompVec init_z(0.0);
@@ -183,6 +213,7 @@ namespace Opm
             double go_contact_depth = param.getDefault<double>("go_contact_depth", 2682.24) - zeroDepth;
         
             double connate_water_saturation = param.getDefault<double>("connate_water_saturation", 0.151090);
+            double residual_oil_saturation = param.getDefault<double>("residual_oil_saturation", 0.118510);
         
             double initial_mixture_gas = param.getDefault("initial_mixture_gas", 247.43);
             double initial_mixture_oil = param.getDefault("initial_mixture_oil", 1.0);
@@ -214,11 +245,11 @@ namespace Opm
                     if (i>0 && k==0) {
                         computeCellState(grid, fluid, gravity,
                                          kk, kk-nz, wo_contact_depth, go_contact_depth, connate_water_saturation,
-                                         simstate);
+                                         residual_oil_saturation, simstate);
                     } else if (k>0) { 
                         computeCellState(grid, fluid, gravity,
                                          kk, kk-1, wo_contact_depth, go_contact_depth, connate_water_saturation,
-                                         simstate);
+                                         residual_oil_saturation, simstate);
                     }
                     // Copy cell properties to y-layers
                     for (int j=1; j<ny; ++j) {
@@ -240,27 +271,21 @@ namespace Opm
                               double wo_contact_depth,
                               double go_contact_depth,
                               double connate_water_saturation,
+                              double residual_oil_saturation,
                               State& simstate)
         {
             typedef typename Fluid::PhaseVec PhaseVec;
 
             const int maxCnt = 30;
-            const double eps = 1.0e-8;
-   
-            //    double pore_vol_ref = grid.cellVolume(iRef)*rock_.porosity(iRef);
-            //    double pore_vol = grid.cellVolume(iCell)*rock_.porosity(iCell);    	
+            const double eps = 1.0e-8;    	
             simstate.cell_z_[iCell] = simstate.cell_z_[iRef];
-            // simstate.cell_z_[iCell] *= pore_vol/pore_vol_ref;
-            bool waterOnly = false;
-            if (grid.cellCentroid(iCell)[2] > wo_contact_depth) { // Maybe a too crude??
-                simstate.cell_z_[iCell][Fluid::Oil] = 0.0;
-                simstate.cell_z_[iCell][Fluid::Gas] = 0.0;
-                waterOnly = true;
-            }
+
+            bool below_wo_contact = false;
+            if (grid.cellCentroid(iCell)[2] > wo_contact_depth)
+                below_wo_contact = true;
+
             double gZ = (grid.cellCentroid(iCell) - grid.cellCentroid(iRef))*gravity;
             double fluid_vol_dens;
-            //    double pv_ref_inv = 1.0/pore_vol_ref;
-            //    double pv_inv = 1.0/pore_vol;
             int cnt =0;    
             do {
                 double rho = 0.5*(simstate.cell_z_[iCell]*fluid.surfaceDensities()
@@ -272,8 +297,10 @@ namespace Opm
                 double oil_vol_dens = state.phase_volume_density_[Fluid::Liquid]
                     + state.phase_volume_density_[Fluid::Vapour];
                 double wat_vol_dens = state.phase_volume_density_[Fluid::Aqua];
-                if (waterOnly) {
-                    simstate.cell_z_[iCell][Fluid::Water] *= 1.0/wat_vol_dens;
+                if (below_wo_contact) {
+                    simstate.cell_z_[iCell][Fluid::Oil] *= residual_oil_saturation/oil_vol_dens;
+                    simstate.cell_z_[iCell][Fluid::Gas] *= residual_oil_saturation/oil_vol_dens;
+                    simstate.cell_z_[iCell][Fluid::Water] *= (1.0-residual_oil_saturation)/wat_vol_dens;
                 } else {
                     simstate.cell_z_[iCell][Fluid::Oil] *= (1.0-connate_water_saturation)/oil_vol_dens;
                     simstate.cell_z_[iCell][Fluid::Gas] *= (1.0-connate_water_saturation)/oil_vol_dens;

@@ -1,3 +1,5 @@
+// -*- tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+// vi: set ts=8 sw=4 et sts=4:
 //===========================================================================
 //
 // File: IncompFlowSolverHybrid.hpp
@@ -62,7 +64,6 @@
 #include <dune/istl/bcrsmatrix.hh>
 #include <dune/istl/operators.hh>
 #include <dune/istl/io.hh>
-#include <dune/istl/matrixmarket.hh>
 
 #include <dune/istl/overlappingschwarz.hh>
 #include <dune/istl/schwarz.hh>
@@ -432,7 +433,7 @@ namespace Dune {
 	    Opm::SparseTable< int  > cellFaces_;
             std::vector<Scalar> pressure_;
 	    Opm::SparseTable<Scalar> outflux_;
-
+	    
             void clear() {
                 std::vector<int>().swap(cellno_);
                 cellFaces_.clear();
@@ -636,7 +637,8 @@ namespace Dune {
         ///
         /// @param [in] linsolver_type
         ///    Control parameter for iterative linear solver software.
-        ///    Type 0 selects a BiCGStab solver, type 1 selects AMG/CG.
+        ///    Type 0 selects a ILU0/CG solver, type 1 selects AMG/CG,
+        ///    type 2 selects KAMG/CG.
         ///
         /// @param [in] linsolver_maxit maximum iterations allowed
         /// @param [in] prolongate_factor Factor to scale the prolongated coarse 
@@ -648,11 +650,11 @@ namespace Dune {
                    const BCInterface&         bc ,
                    const std::vector<double>& src,
                    double residual_tolerance = 1e-8,
-                   int linsolver_maxit = 0,
-                   double prolongate_factor = 1.6,
                    int linsolver_verbosity = 1,
                    int linsolver_type = 1,
                    bool same_matrix = false,
+                   int linsolver_maxit = 0,
+                   double prolongate_factor = 1.6,
                    int smooth_steps = 1)
         {
             assembleDynamic(r, sat, bc, src);
@@ -660,15 +662,15 @@ namespace Dune {
 //             ++count;
 //             printSystem(std::string("linsys_mimetic-") + boost::lexical_cast<std::string>(count));
             switch (linsolver_type) {
-            case 0: // ILU0 preconditioned BiCGStab
+            case 0: // ILU0 preconditioned CG
               solveLinearSystem(residual_tolerance, linsolver_verbosity, linsolver_maxit);
                 break;
-            case 1: // AMG
+            case 1: // AMG preconditioned CG
                 solveLinearSystemAMG(residual_tolerance, linsolver_verbosity, 
 				     linsolver_maxit, prolongate_factor, same_matrix, smooth_steps);
                 break;
 		
-            case 2: // KAMG
+            case 2: // KAMG preconditioned CG
                 solveLinearSystemKAMG(residual_tolerance, linsolver_verbosity, 
 				      linsolver_maxit, prolongate_factor, same_matrix,smooth_steps);
                 break;
@@ -1451,6 +1453,8 @@ namespace Dune {
 
         // --------- storing the AMG operator and preconditioner --------
         boost::scoped_ptr<Operator> opS_;
+        typedef Dune::Preconditioner<Vector,Vector>   PrecondBase;
+        boost::scoped_ptr<PrecondBase> precond_;
 
 
         // ----------------------------------------------------------------
@@ -1458,8 +1462,8 @@ namespace Dune {
                                   int maxit, double prolong_factor, bool same_matrix, int smooth_steps)
         // ----------------------------------------------------------------
         {
-            typedef Amg::AMG<Operator,Vector,Smoother>   Precond;
-            boost::scoped_ptr<Precond> precond_;
+            typedef Amg::AMG<Operator,Vector,Smoother,Amg::SequentialInformation>
+                Precond;
 
             // Adapted from upscaling.cc by Arne Rekdal, 2009
             Scalar residTol = residual_tolerance;
@@ -1481,16 +1485,16 @@ namespace Dune {
 #endif
                 Criterion criterion;
                 criterion.setDebugLevel(verbosity_level);
-                criterion.setSkipIsolated(true);
 #if ANISOTROPIC_3D
                 criterion.setDefaultValuesAnisotropic(3, 2);
 #endif
                 criterion.setProlongationDampingFactor(prolong_factor);
+                criterion.setBeta(1e-10);
                 precond_.reset(new Precond(*opS_, criterion, smootherArgs,
 				           1, smooth_steps, smooth_steps));
             }
             // Construct solver for system of linear equations.
-            CGSolver<Vector> linsolve(*opS_, *precond_, residTol, (maxit>0)?maxit:S_.N(), verbosity_level);
+            CGSolver<Vector> linsolve(*opS_, dynamic_cast<Precond&>(*precond_), residTol, (maxit>0)?maxit:S_.N(), verbosity_level);
 
             InverseOperatorResult result;
             soln_ = 0.0;
@@ -1585,11 +1589,10 @@ namespace Dune {
         void solveLinearSystemKAMG(double residual_tolerance, int verbosity_level,
                                    int maxit, double prolong_factor, bool same_matrix, int smooth_steps)
         // ----------------------------------------------------------------
-        {
-          typedef Amg::KAMG<Operator,Vector,Smoother,Amg::SequentialInformation,
-                            CGSolver<Vector> >   Precond;
-            boost::scoped_ptr<Precond> precond_;
-        
+        {        
+            
+            typedef Amg::KAMG<Operator,Vector,Smoother,Amg::SequentialInformation,
+                              CGSolver<Vector> >   Precond;
             // Adapted from upscaling.cc by Arne Rekdal, 2009
             Scalar residTol = residual_tolerance;
             if (!same_matrix) {
@@ -1599,7 +1602,6 @@ namespace Dune {
                 }
                 opS_.reset(new Operator(S_));
                 
-                //writeMatrixMarket(S_, std::cerr);
                 // Construct preconditioner.
                 double relax = 1;
                 typename Precond::SmootherArgs smootherArgs;
@@ -1610,15 +1612,15 @@ namespace Dune {
 #endif
                 Criterion criterion;
                 criterion.setDebugLevel(verbosity_level);
-                criterion.setSkipIsolated(true);
 #if ANISOTROPIC_3D
                 criterion.setDefaultValuesAnisotropic(3, 2);
 #endif
                 criterion.setProlongationDampingFactor(prolong_factor);
+                criterion.setBeta(1e-10);
                 precond_.reset(new Precond(*opS_, criterion, smootherArgs, 2, smooth_steps, smooth_steps));
             }
             // Construct solver for system of linear equations.
-            CGSolver<Vector> linsolve(*opS_, *precond_, residTol, (maxit>0)?maxit:S_.N(), verbosity_level);
+            CGSolver<Vector> linsolve(*opS_, dynamic_cast<Precond&>(*precond_), residTol, (maxit>0)?maxit:S_.N(), verbosity_level);
 
             InverseOperatorResult result;
             soln_ = 0.0;

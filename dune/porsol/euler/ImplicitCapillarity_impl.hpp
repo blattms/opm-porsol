@@ -187,7 +187,7 @@ namespace Dune
         // Compute capillary pressure.
         // Note that the saturation is just a dummy for this call, since the mobilities are fixed.
         psolver_.solve(capillary_mobilities, saturation, cap_press_bcs, injection_rates_residual,
-                        residual_tolerance_, linsolver_verbosity_, linsolver_type_);
+                       residual_tolerance_, linsolver_verbosity_, linsolver_type_);
 
         // Solve for constant to change capillary pressure solution by.
         std::vector<double> cap_press(num_cells);
@@ -208,7 +208,8 @@ namespace Dune
         const int max_iter = 40;
         const double nonlinear_tolerance = 1e-12;
         int iterations_used = -1;
-        double mod_correct = Opm::modifiedRegulaFalsi(functor, mod_low, mod_high, max_iter, nonlinear_tolerance, iterations_used);
+        typedef Opm::RegulaFalsi<Opm::ThrowOnError> RootFinder;
+        double mod_correct = RootFinder::solve(functor, mod_low, mod_high, max_iter, nonlinear_tolerance, iterations_used);
         std::cout << "Moved capillary pressure solution by " << mod_correct << " after "
                   << iterations_used << " iterations." << std::endl;
         // saturation = functor.lastSaturations();
