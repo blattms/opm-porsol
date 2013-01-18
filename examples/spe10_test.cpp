@@ -183,7 +183,7 @@ int main(int argc, char** argv)
     Dune::VTKWriter<CpGrid::LeafGridView> vtkwriter(grid.leafView());
     vtkwriter.addCellData(cell_velocity_flat, "velocity", 3);
     vtkwriter.addCellData(cell_pressure, "pressure");
-    vtkwriter.write("spe10_test_output", Dune::VTKOptions::ascii);
+    vtkwriter.write("spe10_test_output", Dune::VTK::ascii);
 #endif
     return 0;
 }

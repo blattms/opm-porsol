@@ -142,7 +142,7 @@ void test_flowsolver(const Grid& grid,
     Dune::VTKWriter<typename Grid::LeafGridView> vtkwriter(grid.leafView());
     vtkwriter.addCellData(cell_pressure_flat, "pressure", Fluid::numPhases);
     vtkwriter.addCellData(cell_velocity_flat, "velocity", Grid::dimension);
-    vtkwriter.write("testsolution", Dune::VTKOptions::ascii);
+    vtkwriter.write("testsolution", Dune::VTK::ascii);
 
     // Dump data for Matlab.
     std::ofstream dump("celldump");

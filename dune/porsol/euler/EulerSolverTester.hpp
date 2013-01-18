@@ -190,7 +190,7 @@ namespace Dune
 	    // VTK output.
 	    Dune::VTKWriter<typename GridType::LeafGridView> vtkwriter(grid_.leafView());
 	    vtkwriter.addCellData(celldata, fieldname);
-	    vtkwriter.write(filename, Dune::VTKOptions::ascii);
+	    vtkwriter.write(filename, Dune::VTK::ascii);
 	    // Dumping the saturation.
 // 	    std::ofstream os((filename + "_" + fieldname).c_str());
 // 	    std::copy(celldata.begin(), celldata.end(), std::ostream_iterator<double>(os, "\n"));
