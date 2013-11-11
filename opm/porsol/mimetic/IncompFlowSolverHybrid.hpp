@@ -681,7 +681,7 @@ namespace Opm {
 				      linsolver_maxit, prolongate_factor, same_matrix,smooth_steps);
                 break;
             case 3: // CG preconditioned with AMG that uses less memory badwidth
-#ifdef HAS_DUNE_FAST_AMG
+#if defined(HAS_DUNE_FAST_AMG) || DUNE_VERSION_NEWER(DUNE_ISTL, 2, 3)
                 solveLinearSystemFastAMG(residual_tolerance, linsolver_verbosity, 
                              linsolver_maxit, prolongate_factor, same_matrix,smooth_steps);
 #else
